@@ -130,7 +130,9 @@ flush() {
 
 finish() {
   flush
-  printf "\n"
+  if [ -z $BATS_NO_SUMMARY ];then
+      printf "\n"
+  fi
 }
 
 trap finish EXIT
@@ -162,4 +164,6 @@ while IFS= read -r line; do
   esac
 done
 
-buffer summary
+if [ -z $BATS_NO_SUMMARY ];then
+    buffer summary
+fi

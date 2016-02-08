@@ -272,7 +272,13 @@ bats_perform_tests() {
   test_number=1
   status=0
   for test_name in "$@"; do
-    "$0" $BATS_EXTENDED_SYNTAX "$BATS_TEST_FILENAME" "$test_name" "$test_number" || status=1
+  # john.a.westlund@intel.com -- enable millisecond timing
+    if [ -n "$BATS_ENABLE_TIMING" ]; then
+      TIMEFORMAT='  duration_ms: %3R'
+      { time "$0" $BATS_EXTENDED_SYNTAX "$BATS_TEST_FILENAME" "$test_name" "$test_number"; } 2>&1 || status=1
+    else
+      "$0" $BATS_EXTENDED_SYNTAX "$BATS_TEST_FILENAME" "$test_name" "$test_number" || status=1
+    fi
     let test_number+=1
   done
   exit "$status"
@@ -301,10 +307,19 @@ bats_perform_test() {
   fi
 }
 
-if [ -z "$TMPDIR" ]; then
-  BATS_TMPDIR="/tmp"
+# john.a.westlund@intel.com
+# if the BATS_MKTEMP_DIR is exported from BATS use it, BATS should set this if the -T
+# option is passed or the BATS_USE_MKTEMP variable is exported by the shell
+# this should prevent collisions of temp files based on PIDs, especially when multiple
+# people are running tests
+if [ -z "$BATS_MKTEMP_DIR" ]; then
+  if [ -z "$TMPDIR" ]; then
+    BATS_TMPDIR="/tmp"
+  else
+    BATS_TMPDIR="${TMPDIR%/}"
+  fi
 else
-  BATS_TMPDIR="${TMPDIR%/}"
+  BATS_TMPDIR="$BATS_MKTEMP_DIR"
 fi
 
 BATS_TMPNAME="$BATS_TMPDIR/bats.$$"

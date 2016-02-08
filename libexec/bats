@@ -21,6 +21,8 @@ help() {
   echo "  -p, --pretty   Show results in pretty format (default for terminals)"
   echo "  -t, --tap      Show results in TAP format"
   echo "  -v, --version  Display the version number"
+  echo "  -x, --xml      JUnit XML Output"
+  echo "  -T, --mktemp   use 'mktemp' to generate unique temp directory names"
   echo
   echo "  For more information, see https://github.com/sstephenson/bats"
   echo
@@ -99,6 +101,12 @@ for option in "${options[@]}"; do
   "p" | "pretty" )
     pretty="1"
     ;;
+  "x" | "xml" )
+    xml="1"
+    ;;
+  "T" | "mktemp" )
+    mktemp="1"
+    ;;
   * )
     usage >&2
     exit 1
@@ -109,6 +117,14 @@ done
 if [ "${#arguments[@]}" -eq 0 ]; then
   usage >&2
   exit 1
+fi
+
+if [ "x$BATS_JUNIT_FORMAT" == "x1" ]; then
+  xml="1"
+fi
+
+if [ "x$BATS_USE_MKTEMP" == "x1" ]; then
+  mktemp="1"
 fi
 
 filenames=()
@@ -130,13 +146,54 @@ else
   command="bats-exec-suite"
 fi
 
-if [ -n "$pretty" ]; then
-  extended_syntax_flag="-x"
-  formatter="bats-format-tap-stream"
-else
+# john.a.westlund@intel.com
+# if mktemp is found use it to generate a temp directory that will be passed to bats-exec-test or bats-exec-suite
+if [ -n "$mktemp" ]; then
+  if [ -x "$(which mktemp 2> /dev/null)" ]; then
+    export BATS_MKTEMP_DIR="$(`which mktemp` -d -p /tmp bats.XXXXXX)"
+  fi
+fi
+
+if [ -n "$xml" ]; then
   extended_syntax_flag=""
-  formatter="cat"
+  formatter="tap-to-junit-xml"
+else
+  if [ -n "$pretty" ]; then
+    extended_syntax_flag="-x"
+    formatter="bats-format-tap-stream"
+  else
+    extended_syntax_flag=""
+    formatter="cat"
+  fi
 fi
 
 set -o pipefail execfail
-exec "$command" $count_flag $extended_syntax_flag "${filenames[@]}" | "$formatter"
+
+if [ "$formatter" == "tap-to-junit-xml" ]; then
+  if [ "x$BATS_JUNIT_GROUP" != "x" ]; then
+    JUNIT_GROUP=$BATS_JUNIT_GROUP
+  else
+    JUNIT_GROUP="CMT"
+  fi
+
+  if [ "${#filenames[@]}" -eq 1 ]; then
+    baseName=`basename ${filenames[@]}`
+    # john.a.westlund@intel.com
+    # if there is an error in the test execution continue processing this script so that timing data can be inserted
+    # also, add mktemp_flag
+    set +e
+    exec "$command" $count_flag $extended_syntax_flag "${filenames[@]}" | tee >(cat >&2) | tee "${baseName}.log" | "$formatter" --cmt $JUNIT_GROUP --output "${baseName}.log.xml"
+    set -e
+    # john.a.westlund@intel.com
+    # If timing is enabled fix the JUNIT xml output to include timing data
+    if [ -n "$BATS_ENABLE_TIMING" ]; then
+      fix-timings.pl -i "${baseName}.log.xml"
+    fi
+  else
+    echo "Error: Junit parsing incompatible with multiple files"
+    exit 1
+  fi
+
+else
+  exec "$command" $count_flag $extended_syntax_flag "${filenames[@]}" | "$formatter"
+fi
